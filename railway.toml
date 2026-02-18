@@ -1,0 +1,6 @@
+# Railway deployment config for OpenClaw
+# Overrides the default CMD to bind to 0.0.0.0 (required for Railway's proxy)
+# Default Dockerfile CMD binds to 127.0.0.1 (localhost only) for security
+
+[deploy]
+startCommand = "node openclaw.mjs gateway --allow-unconfigured --bind lan"
