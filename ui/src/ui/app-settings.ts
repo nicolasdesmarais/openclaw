@@ -111,6 +111,12 @@ export function applySettingsFromUrl(host: SettingsHost) {
     const password = passwordRaw.trim();
     if (password) {
       host.password = password;
+      // Persist in localStorage so reconnects / iframe reloads keep the password.
+      try {
+        localStorage.setItem("openclaw.control.password", password);
+      } catch {
+        // localStorage might be unavailable in sandboxed iframes — ignore.
+      }
     }
     params.delete("password");
     hashParams.delete("password");

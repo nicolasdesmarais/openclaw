@@ -113,7 +113,13 @@ export class OpenClawApp extends LitElement {
       void i18n.setLocale(this.settings.locale);
     }
   }
-  @state() password = "";
+  @state() password = (() => {
+    try {
+      return localStorage.getItem("openclaw.control.password") ?? "";
+    } catch {
+      return "";
+    }
+  })();
   @state() tab: Tab = "chat";
   @state() onboarding = resolveOnboardingMode();
   @state() connected = false;
