@@ -1,9 +1,5 @@
 # Railway deployment config for OpenClaw
-# Overrides the default CMD to bind to 0.0.0.0 (required for Railway's proxy)
-# Default Dockerfile CMD binds to 127.0.0.1 (localhost only) for security
-#
-# Also creates a config file that disables device pairing (required for
-# browser-based Control UI access in headless/container environments)
+# Uses start.sh to create config and start gateway bound to 0.0.0.0
 
 [deploy]
-startCommand = "mkdir -p /data/.openclaw && test -f /data/.openclaw/openclaw.json || echo '{\"gateway\":{\"controlUi\":{\"dangerouslyDisableDeviceAuth\":true}}}' > /data/.openclaw/openclaw.json && node openclaw.mjs gateway --allow-unconfigured --bind lan"
+startCommand = "sh start.sh"
