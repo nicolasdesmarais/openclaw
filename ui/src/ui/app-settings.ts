@@ -135,6 +135,34 @@ export function applySettingsFromUrl(host: SettingsHost) {
     }
   }
 
+  // Force theme when embedded via URL (e.g. ?theme=light)
+  const themeRaw = params.get("theme") ?? hashParams.get("theme");
+  if (themeRaw != null) {
+    const theme = themeRaw.trim().toLowerCase();
+    if (theme === "light" || theme === "dark") {
+      applySettings(host, { ...host.settings, theme });
+    }
+    params.delete("theme");
+    hashParams.delete("theme");
+    shouldCleanUrl = true;
+  }
+
+  // Read custom instance name (passed by DevsChannels iframe embedding)
+  const nameRaw = params.get("name") ?? hashParams.get("name");
+  if (nameRaw != null) {
+    const name = nameRaw.trim();
+    if (name) {
+      try {
+        localStorage.setItem("openclaw.control.instanceName", name);
+      } catch {
+        // localStorage might be unavailable in sandboxed iframes — ignore.
+      }
+    }
+    params.delete("name");
+    hashParams.delete("name");
+    shouldCleanUrl = true;
+  }
+
   if (gatewayUrlRaw != null) {
     const gatewayUrl = gatewayUrlRaw.trim();
     if (gatewayUrl && gatewayUrl !== host.settings.gatewayUrl) {
