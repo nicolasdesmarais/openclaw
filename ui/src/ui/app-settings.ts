@@ -106,7 +106,12 @@ export function applySettingsFromUrl(host: SettingsHost) {
   }
 
   if (passwordRaw != null) {
-    // Never hydrate password from URL params; strip only.
+    // Hydrate password from URL params (needed for iframe SSO from DevsChannels),
+    // then strip from the visible URL for security.
+    const password = passwordRaw.trim();
+    if (password) {
+      host.password = password;
+    }
     params.delete("password");
     hashParams.delete("password");
     shouldCleanUrl = true;
