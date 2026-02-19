@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
@@ -72,10 +73,56 @@ type ControlUiAvatarMeta = {
 };
 
 function applyControlUiSecurityHeaders(res: ServerResponse) {
-  res.setHeader("X-Frame-Options", "DENY");
+  // When iframe embedding is allowed (OPENCLAW_ALLOWED_FRAME_ANCESTORS is set),
+  // omit X-Frame-Options entirely and rely solely on the CSP frame-ancestors
+  // directive which supersedes it and supports wildcards/multiple origins.
+  const allowFrameAncestors = process.env.OPENCLAW_ALLOWED_FRAME_ANCESTORS;
+  if (!allowFrameAncestors || !allowFrameAncestors.trim()) {
+    res.setHeader("X-Frame-Options", "DENY");
+  }
   res.setHeader("Content-Security-Policy", buildControlUiCspHeader());
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
+}
+
+// ---------------------------------------------------------------------------
+// Signed URL verification — validates HMAC signatures from DevsChannels
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify an HMAC-SHA256 signed URL from DevsChannels.
+ *
+ * The signed URL contains query params:
+ *   sig  — HMAC-SHA256 hex digest of "{iid}:{exp}"
+ *   exp  — expiry timestamp (ms since epoch)
+ *   iid  — instance ID
+ *
+ * The HMAC key is the per-instance `OPENCLAW_IFRAME_SECRET` env var.
+ *
+ * Returns true if the signature is valid and not expired.
+ */
+export function verifySignedUrl(url: URL): boolean {
+  const secret = process.env.OPENCLAW_IFRAME_SECRET;
+  if (!secret) return false;
+
+  const sig = url.searchParams.get("sig");
+  const exp = url.searchParams.get("exp");
+  const iid = url.searchParams.get("iid");
+
+  if (!sig || !exp || !iid) return false;
+
+  const expiresAt = Number(exp);
+  if (Number.isNaN(expiresAt) || Date.now() > expiresAt) return false;
+
+  const payload = `${iid}:${exp}`;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+
+  // Timing-safe comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
@@ -228,6 +275,32 @@ export function handleControlUiHttpRequest(
   }
 
   applyControlUiSecurityHeaders(res);
+
+  // -------------------------------------------------------------------------
+  // Signed URL enforcement — when OPENCLAW_IFRAME_SECRET is set, the initial
+  // page request (index.html / SPA fallback) must carry a valid HMAC signature.
+  // Sub-resources (JS, CSS, images) loaded by the page are exempt since they
+  // are fetched by the browser from the same origin and protected by CSP.
+  // -------------------------------------------------------------------------
+  const iframeSecret = process.env.OPENCLAW_IFRAME_SECRET;
+  if (iframeSecret) {
+    const hasSigParams = url.searchParams.has("sig");
+    // Only enforce on HTML page requests (not assets like .js/.css/.svg/.png)
+    const uiRelPath = basePath && pathname.startsWith(`${basePath}/`)
+      ? pathname.slice(basePath.length)
+      : pathname;
+    const ext = path.extname(uiRelPath).toLowerCase();
+    const isAssetRequest = ext && ext !== ".html";
+
+    if (!isAssetRequest && hasSigParams) {
+      if (!verifySignedUrl(url)) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("Forbidden: invalid or expired signed URL");
+        return true;
+      }
+    }
+  }
 
   const bootstrapConfigPath = basePath
     ? `${basePath}${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`
