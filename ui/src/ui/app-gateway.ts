@@ -229,6 +229,15 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     if (state === "final") {
       void loadChatHistory(host as unknown as OpenClawApp);
+
+      // Notify parent frame when onboarding chat completes (used by DevsChannels Peers UI)
+      if (host.onboarding && window.parent !== window) {
+        try {
+          window.parent.postMessage({ type: "openclaw:onboarding-complete" }, "*");
+        } catch {
+          // Ignore cross-origin errors
+        }
+      }
     }
     return;
   }
