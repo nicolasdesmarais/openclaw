@@ -28,15 +28,42 @@ function looksLikeEnvelopeHeader(header: string): boolean {
 }
 
 export function stripEnvelope(text: string): string {
-  const match = text.match(ENVELOPE_PREFIX);
+  // First strip any inbound metadata blocks that precede the envelope.
+  // These are injected by OpenClaw for LLM context but should not be shown
+  // in the chat UI.
+  const stripped = stripInboundMeta(text);
+
+  const match = stripped.match(ENVELOPE_PREFIX);
   if (!match) {
-    return text;
+    return stripped;
   }
   const header = match[1] ?? "";
   if (!looksLikeEnvelopeHeader(header)) {
-    return text;
+    return stripped;
   }
-  return text.slice(match[0].length);
+  return stripped.slice(match[0].length);
+}
+
+/**
+ * Strip OpenClaw-injected inbound metadata blocks from message text.
+ *
+ * Removes blocks like:
+ *   Conversation info (untrusted metadata):
+ *   ```json
+ *   { "message_id": "...", "sender": "..." }
+ *   ```
+ *
+ * These are prepended by `buildInboundUserContextPrefix()` for the LLM's
+ * benefit and should not appear in the chat UI.
+ */
+export function stripInboundMeta(text: string): string {
+  // Match: "Label (untrusted ...) :\n```json\n...\n```"
+  // Covers: Conversation info, Sender, Forwarded message context,
+  //         Chat history since last reply, Replied message, Thread starter
+  return text.replace(
+    /(?:Conversation info|Sender|Forwarded message context|Chat history since last reply|Replied message|Thread starter)\s*\([^)]*\):\s*```(?:json)?\s*[\s\S]*?```\s*/g,
+    "",
+  ).trim();
 }
 
 export function stripMessageIdHints(text: string): string {
