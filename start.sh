@@ -1,13 +1,29 @@
 #!/bin/sh
 # Railway startup script for OpenClaw
-# Creates config on first boot and starts the gateway bound to 0.0.0.0
+# Creates / updates config and starts the gateway bound to 0.0.0.0
 
 # Create OpenClaw config directory
 mkdir -p /data/.openclaw
 
-# Write config on first boot.
-# Subsequent changes made via the OpenClaw UI are preserved.
-if [ ! -f /data/.openclaw/openclaw.json ]; then
+# ──────────────────────────────────────────────────────────────────────────────
+# Config generation strategy:
+#   - When DEVS_AI_AGENT_ID is set, ALWAYS regenerate openclaw.json so that
+#     env-var changes (new agent, new proxy URL) take effect on redeploy.
+#   - When no DEVS_AI_AGENT_ID, only create a default config on first boot
+#     (preserves manual LLM key edits made via the OpenClaw UI).
+# ──────────────────────────────────────────────────────────────────────────────
+
+NEEDS_WRITE=false
+
+if [ -n "$DEVS_AI_AGENT_ID" ] && [ -n "$OPENAI_API_BASE_URL" ]; then
+  # Always rewrite when Devs.ai proxy is configured — env vars may have changed
+  NEEDS_WRITE=true
+elif [ ! -f /data/.openclaw/openclaw.json ]; then
+  # First boot without Devs.ai — write a minimal default config
+  NEEDS_WRITE=true
+fi
+
+if [ "$NEEDS_WRITE" = "true" ]; then
 
   if [ -n "$DEVS_AI_AGENT_ID" ] && [ -n "$OPENAI_API_BASE_URL" ]; then
     # ── Devs.ai agent selected ──────────────────────────────────────────
@@ -63,7 +79,17 @@ EOFCFG
 EOF
     echo "[start.sh] Created default config (no Devs.ai agent — configure LLM in OpenClaw UI)"
   fi
+
+  echo "[start.sh] Config written to /data/.openclaw/openclaw.json"
 fi
+
+# Log the resolved config for debugging (redact secrets)
+echo "[start.sh] === Config summary ==="
+echo "[start.sh] DEVS_AI_AGENT_ID=${DEVS_AI_AGENT_ID:-<not set>}"
+echo "[start.sh] OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-<not set>}"
+echo "[start.sh] OPENAI_API_KEY=$(echo "${OPENAI_API_KEY}" | cut -c1-8)..."
+echo "[start.sh] PORT=${PORT:-18789}"
+echo "[start.sh] ======================"
 
 # Start gateway bound to 0.0.0.0 (required for Railway's proxy to reach the app)
 exec node openclaw.mjs gateway --allow-unconfigured --bind lan
