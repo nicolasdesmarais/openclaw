@@ -83,12 +83,71 @@ EOF
   echo "[start.sh] Config written to /data/.openclaw/openclaw.json"
 fi
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Fetch Peers setup config from Atreides and merge into openclaw.json.
+# The Peers setup wizard saves preferences (identity, personality, tools) to
+# Convex.  Atreides serves them at GET /api/v1/instances/:id/setup-config.
+# This runs on every boot so the instance always reflects the latest config.
+# ──────────────────────────────────────────────────────────────────────────────
+
+if [ -n "$OPENCLAW_INSTANCE_ID" ] && [ -n "$ATREIDES_URL" ]; then
+  echo "[start.sh] Fetching setup config from Atreides for instance ${OPENCLAW_INSTANCE_ID}..."
+  SETUP_JSON=$(curl -sf --max-time 10 "${ATREIDES_URL}/api/v1/instances/${OPENCLAW_INSTANCE_ID}/setup-config" 2>/dev/null || echo "")
+
+  if [ -n "$SETUP_JSON" ]; then
+    # Use Node.js (always available) to deep-merge setup preferences into openclaw.json
+    node -e '
+      const fs = require("fs");
+      const setup = JSON.parse(process.argv[1]);
+      if (!setup.configured) {
+        console.log("[start.sh] No setup config yet (wizard not completed) — skipping merge");
+        process.exit(0);
+      }
+      const configPath = "/data/.openclaw/openclaw.json";
+      const base = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const patch = setup.config || {};
+
+      // Deep-merge agents.defaults (preserve model selection, add systemPromptAppend)
+      if (patch.agents?.defaults) {
+        if (!base.agents) base.agents = {};
+        if (!base.agents.defaults) base.agents.defaults = {};
+        Object.assign(base.agents.defaults, patch.agents.defaults);
+      }
+
+      // Deep-merge tools (preserve existing tool config, add profiles/elevated)
+      if (patch.tools) {
+        if (!base.tools) base.tools = {};
+        if (patch.tools.profiles) {
+          if (!base.tools.profiles) base.tools.profiles = {};
+          if (patch.tools.profiles.default) {
+            base.tools.profiles.default = {
+              ...(base.tools.profiles.default || {}),
+              ...patch.tools.profiles.default,
+            };
+          }
+        }
+        if (patch.tools.elevated) {
+          base.tools.elevated = patch.tools.elevated;
+        }
+      }
+
+      fs.writeFileSync(configPath, JSON.stringify(base, null, 2));
+      console.log("[start.sh] Merged Peers setup config —", setup.agentName || "unnamed");
+    ' "$SETUP_JSON"
+  else
+    echo "[start.sh] Could not reach Atreides or no setup config returned — using base config"
+  fi
+else
+  echo "[start.sh] OPENCLAW_INSTANCE_ID or ATREIDES_URL not set — skipping setup config fetch"
+fi
+
 # Log the resolved config for debugging (redact secrets)
 echo "[start.sh] === Config summary ==="
 echo "[start.sh] DEVS_AI_AGENT_ID=${DEVS_AI_AGENT_ID:-<not set>}"
 echo "[start.sh] OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-<not set>}"
 echo "[start.sh] OPENAI_API_KEY=$(echo "${OPENAI_API_KEY}" | cut -c1-8)..."
 echo "[start.sh] PORT=${PORT:-18789}"
+echo "[start.sh] OPENCLAW_INSTANCE_ID=${OPENCLAW_INSTANCE_ID:-<not set>}"
 echo "[start.sh] ======================"
 
 # Start gateway bound to 0.0.0.0 (required for Railway's proxy to reach the app)
